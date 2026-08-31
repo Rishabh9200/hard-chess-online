@@ -6,7 +6,9 @@
   <title>Hard Chess Online</title>
 
   <style>
-    * { box-sizing: border-box; }
+    * {
+      box-sizing: border-box;
+    }
 
     body {
       margin: 0;
@@ -17,39 +19,48 @@
     }
 
     h1 {
-      margin: 20px 0 10px;
+      margin: 20px 0 5px;
     }
 
-    #status {
+    #info {
       margin: 10px;
       font-size: 18px;
     }
 
-    .room {
-      margin: 15px;
-    }
-
-    input, button {
-      padding: 10px 14px;
-      font-size: 16px;
+    #room {
+      padding: 10px;
+      width: 180px;
       border-radius: 6px;
-      border: 0;
-      margin: 4px;
+      border: none;
+      font-size: 16px;
     }
 
     button {
+      padding: 10px 18px;
+      margin: 5px;
+      border: none;
+      border-radius: 6px;
       cursor: pointer;
-      background: #2563eb;
+      font-size: 16px;
+    }
+
+    #joinBtn {
+      background: #22c55e;
+      color: white;
+    }
+
+    #resetBtn {
+      background: #ef4444;
       color: white;
     }
 
     #board {
-      width: min(90vw, 560px);
-      height: min(90vw, 560px);
+      width: min(90vw, 520px);
+      height: min(90vw, 520px);
       margin: 20px auto;
       display: grid;
       grid-template-columns: repeat(8, 1fr);
-      border: 4px solid #333;
+      border: 4px solid #374151;
     }
 
     .square {
@@ -57,21 +68,26 @@
       align-items: center;
       justify-content: center;
       font-size: clamp(28px, 8vw, 58px);
-      cursor: pointer;
       user-select: none;
+      cursor: pointer;
     }
 
-    .light { background: #f0d9b5; }
-    .dark { background: #b58863; }
+    .light {
+      background: #f0d9b5;
+    }
+
+    .dark {
+      background: #b58863;
+    }
 
     .selected {
-      outline: 5px solid yellow;
-      outline-offset: -5px;
+      outline: 4px solid #22c55e;
+      outline-offset: -4px;
     }
 
-    #error {
-      color: #ff6b6b;
-      min-height: 24px;
+    #message {
+      min-height: 25px;
+      color: #facc15;
     }
   </style>
 </head>
@@ -80,14 +96,14 @@
 
   <h1>♟ Hard Chess Online ♟</h1>
 
-  <div class="room">
-    <input id="room" placeholder="Room code" maxlength="12">
+  <div>
+    <input id="room" placeholder="Room Code">
     <button id="joinBtn">Join Room</button>
     <button id="resetBtn">Reset</button>
   </div>
 
-  <div id="status">Enter a room code</div>
-  <div id="error"></div>
+  <div id="info">Not connected</div>
+  <div id="message"></div>
 
   <div id="board"></div>
 
@@ -97,13 +113,13 @@
     const socket = io();
 
     const board = document.getElementById("board");
-    const status = document.getElementById("status");
-    const error = document.getElementById("error");
+    const roomInput = document.getElementById("room");
+    const info = document.getElementById("info");
+    const message = document.getElementById("message");
 
     let myColor = null;
     let selected = null;
-    let currentFen =
-      "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR";
+    let currentFen = null;
 
     const pieces = {
       K: "♔",
@@ -112,6 +128,7 @@
       B: "♗",
       N: "♘",
       P: "♙",
+
       k: "♚",
       q: "♛",
       r: "♜",
@@ -120,83 +137,14 @@
       p: "♟"
     };
 
-    function drawBoard(fen) {
-      board.innerHTML = "";
-
-      const rows = fen.split("/");
-
-      for (let r = 0; r < 8; r++) {
-        let files = [];
-
-        for (const char of rows[r]) {
-          if (/\d/.test(char)) {
-            for (let i = 0; i < Number(char); i++) {
-              files.push("");
-            }
-          } else {
-            files.push(char);
-          }
-        }
-
-        for (let c = 0; c < 8; c++) {
-          const square = document.createElement("div");
-
-          square.className =
-            "square " + ((r + c) % 2 === 0 ? "light" : "dark");
-
-          const file = String.fromCharCode(97 + c);
-          const rank = 8 - r;
-          const name = file + rank;
-
-          square.dataset.square = name;
-          square.textContent = pieces[files[c]] || "";
-
-          if (selected === name) {
-            square.classList.add("selected");
-          }
-
-          square.onclick = () => clickSquare(name);
-
-          board.appendChild(square);
-        }
-      }
-    }
-
-    function clickSquare(square) {
-
-      if (!myColor) return;
-
-      if (!selected) {
-        selected = square;
-        drawBoard(currentFen);
-        return;
-      }
-
-      if (selected === square) {
-        selected = null;
-        drawBoard(currentFen);
-        return;
-      }
-
-      socket.emit("move", {
-        from: selected,
-        to: square,
-        promotion: "q"
-      });
-
-      selected = null;
-      drawBoard(currentFen);
-    }
-
     document.getElementById("joinBtn").onclick = () => {
-      const room = document.getElementById("room").value.trim();
+      const room = roomInput.value.trim();
 
       if (!room) {
-        error.textContent = "Enter a room code.";
+        message.textContent = "Room code enter karo.";
         return;
       }
 
-      error.textContent = "";
       socket.emit("join", { room });
     };
 
@@ -207,32 +155,148 @@
     socket.on("joined", data => {
       myColor = data.color;
 
-      status.textContent =
-        "Joined room: " + data.room +
-        " | You are " +
+      info.textContent =
+        "Room: " + data.room +
+        " | You are: " +
         (myColor === "w" ? "White" : "Black");
-    });
 
-    socket.on("state", data => {
-      currentFen = data.fen.split(" ")[0];
-
-      drawBoard(currentFen);
-
-      if (data.result) {
-        status.textContent = data.result;
-      } else {
-        status.textContent =
-          "Players: " + data.players +
-          " | Turn: " +
-          (data.turn === "w" ? "White" : "Black");
-      }
+      message.textContent = "Game joined!";
     });
 
     socket.on("errorMsg", msg => {
-      error.textContent = msg;
+      message.textContent = msg;
     });
 
-    drawBoard(currentFen);
+    socket.on("state", state => {
+      currentFen = state.fen;
+
+      renderBoard(state.fen);
+
+      if (state.over) {
+        info.textContent = state.result || "Game Over";
+      } else {
+        info.textContent =
+          "Turn: " +
+          (state.turn === "w" ? "White" : "Black") +
+          " | Players: " +
+          state.players;
+      }
+    });
+
+    function renderBoard(fen) {
+      board.innerHTML = "";
+
+      const position = fen.split(" ")[0];
+      const rows = position.split("/");
+
+      let squares = [];
+
+      for (let row = 0; row < 8; row++) {
+        let col = 0;
+
+        for (const char of rows[row]) {
+
+          if (!isNaN(char)) {
+            const empty = Number(char);
+
+            for (let i = 0; i < empty; i++) {
+              squares.push({
+                row: row,
+                col: col,
+                piece: null
+              });
+
+              col++;
+            }
+
+          } else {
+            squares.push({
+              row: row,
+              col: col,
+              piece: char
+            });
+
+            col++;
+          }
+        }
+      }
+
+      // Black player ke liye board ulta
+      if (myColor === "b") {
+        squares.reverse();
+      }
+
+      squares.forEach(square => {
+
+        const div = document.createElement("div");
+
+        const actualRow = square.row;
+        const actualCol = square.col;
+
+        div.classList.add("square");
+
+        if ((actualRow + actualCol) % 2 === 0) {
+          div.classList.add("light");
+        } else {
+          div.classList.add("dark");
+        }
+
+        const file = String.fromCharCode(97 + actualCol);
+        const rank = 8 - actualRow;
+        const squareName = file + rank;
+
+        div.dataset.square = squareName;
+
+        if (selected === squareName) {
+          div.classList.add("selected");
+        }
+
+        if (square.piece) {
+          div.textContent = pieces[square.piece];
+        }
+
+        div.onclick = () => handleSquare(squareName);
+
+        board.appendChild(div);
+      });
+    }
+
+    function handleSquare(square) {
+
+      if (!myColor) {
+        message.textContent = "Pehle room join karo.";
+        return;
+      }
+
+      if (!selected) {
+        selected = square;
+        renderBoard(currentFen);
+        return;
+      }
+
+      if (selected === square) {
+        selected = null;
+        renderBoard(currentFen);
+        return;
+      }
+
+      socket.emit("move", {
+        from: selected,
+        to: square,
+        promotion: "q"
+      });
+
+      selected = null;
+      renderBoard(currentFen);
+    }
+
+    socket.on("connect", () => {
+      message.textContent = "Connected to server.";
+    });
+
+    socket.on("disconnect", () => {
+      message.textContent = "Server disconnected.";
+    });
   </script>
 
 </body>
