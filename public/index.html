@@ -1,148 +1,239 @@
-const express = require('express');
-const http = require('http');
-const { Server } = require('socket.io');
-const { Chess } = require('chess.js');
-const path = require('path');
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Hard Chess Online</title>
 
-const app = express();
-const server = http.createServer(app);
-const io = new Server(server);
+  <style>
+    * { box-sizing: border-box; }
 
-app.use(express.static(path.join(__dirname, 'public')));
-
-app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
-});
-
-const rooms = new Map();
-
-function clean(code) {
-  return String(code || '')
-    .trim()
-    .toUpperCase()
-    .replace(/[^A-Z0-9]/g, '')
-    .slice(0, 12);
-}
-
-function state(r) {
-  return {
-    fen: r.game.fen(),
-    turn: r.game.turn(),
-    players: r.players.length,
-    over: r.game.isGameOver(),
-    result: r.game.isCheckmate()
-      ? (r.game.turn() === 'w' ? 'Black' : 'White') + ' wins by checkmate'
-      : r.game.isDraw()
-        ? 'Draw'
-        : null
-  };
-}
-
-io.on('connection', socket => {
-
-  socket.on('join', ({ room }) => {
-    room = clean(room);
-
-    if (!room) {
-      return socket.emit('errorMsg', 'Enter a room code.');
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background: #111827;
+      color: white;
+      text-align: center;
     }
 
-    let r = rooms.get(room);
-
-    if (!r) {
-      r = {
-        game: new Chess(),
-        players: [],
-        spectators: []
-      };
-      rooms.set(room, r);
+    h1 {
+      margin: 20px 0 10px;
     }
 
-    if (r.players.length >= 2) {
-      return socket.emit('errorMsg', 'Room is full.');
+    #status {
+      margin: 10px;
+      font-size: 18px;
     }
 
-    const color = r.players.length === 0 ? 'w' : 'b';
-
-    r.players.push({
-      id: socket.id,
-      color
-    });
-
-    socket.join(room);
-    socket.data.room = room;
-    socket.data.color = color;
-
-    socket.emit('joined', {
-      color,
-      room
-    });
-
-    io.to(room).emit('state', state(r));
-  });
-
-  socket.on('move', ({ from, to, promotion }) => {
-    const room = socket.data.room;
-    const r = rooms.get(room);
-
-    if (!r) return;
-
-    const p = r.players.find(x => x.id === socket.id);
-
-    if (
-      !p ||
-      r.game.turn() !== p.color ||
-      r.game.isGameOver()
-    ) {
-      return;
+    .room {
+      margin: 15px;
     }
 
-    try {
-      const m = r.game.move({
-        from,
-        to,
-        promotion: promotion || 'q'
+    input, button {
+      padding: 10px 14px;
+      font-size: 16px;
+      border-radius: 6px;
+      border: 0;
+      margin: 4px;
+    }
+
+    button {
+      cursor: pointer;
+      background: #2563eb;
+      color: white;
+    }
+
+    #board {
+      width: min(90vw, 560px);
+      height: min(90vw, 560px);
+      margin: 20px auto;
+      display: grid;
+      grid-template-columns: repeat(8, 1fr);
+      border: 4px solid #333;
+    }
+
+    .square {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: clamp(28px, 8vw, 58px);
+      cursor: pointer;
+      user-select: none;
+    }
+
+    .light { background: #f0d9b5; }
+    .dark { background: #b58863; }
+
+    .selected {
+      outline: 5px solid yellow;
+      outline-offset: -5px;
+    }
+
+    #error {
+      color: #ff6b6b;
+      min-height: 24px;
+    }
+  </style>
+</head>
+
+<body>
+
+  <h1>♟ Hard Chess Online ♟</h1>
+
+  <div class="room">
+    <input id="room" placeholder="Room code" maxlength="12">
+    <button id="joinBtn">Join Room</button>
+    <button id="resetBtn">Reset</button>
+  </div>
+
+  <div id="status">Enter a room code</div>
+  <div id="error"></div>
+
+  <div id="board"></div>
+
+  <script src="/socket.io/socket.io.js"></script>
+
+  <script>
+    const socket = io();
+
+    const board = document.getElementById("board");
+    const status = document.getElementById("status");
+    const error = document.getElementById("error");
+
+    let myColor = null;
+    let selected = null;
+    let currentFen =
+      "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR";
+
+    const pieces = {
+      K: "♔",
+      Q: "♕",
+      R: "♖",
+      B: "♗",
+      N: "♘",
+      P: "♙",
+      k: "♚",
+      q: "♛",
+      r: "♜",
+      b: "♝",
+      n: "♞",
+      p: "♟"
+    };
+
+    function drawBoard(fen) {
+      board.innerHTML = "";
+
+      const rows = fen.split("/");
+
+      for (let r = 0; r < 8; r++) {
+        let files = [];
+
+        for (const char of rows[r]) {
+          if (/\d/.test(char)) {
+            for (let i = 0; i < Number(char); i++) {
+              files.push("");
+            }
+          } else {
+            files.push(char);
+          }
+        }
+
+        for (let c = 0; c < 8; c++) {
+          const square = document.createElement("div");
+
+          square.className =
+            "square " + ((r + c) % 2 === 0 ? "light" : "dark");
+
+          const file = String.fromCharCode(97 + c);
+          const rank = 8 - r;
+          const name = file + rank;
+
+          square.dataset.square = name;
+          square.textContent = pieces[files[c]] || "";
+
+          if (selected === name) {
+            square.classList.add("selected");
+          }
+
+          square.onclick = () => clickSquare(name);
+
+          board.appendChild(square);
+        }
+      }
+    }
+
+    function clickSquare(square) {
+
+      if (!myColor) return;
+
+      if (!selected) {
+        selected = square;
+        drawBoard(currentFen);
+        return;
+      }
+
+      if (selected === square) {
+        selected = null;
+        drawBoard(currentFen);
+        return;
+      }
+
+      socket.emit("move", {
+        from: selected,
+        to: square,
+        promotion: "q"
       });
 
-      if (m) {
-        io.to(room).emit('state', state(r));
+      selected = null;
+      drawBoard(currentFen);
+    }
+
+    document.getElementById("joinBtn").onclick = () => {
+      const room = document.getElementById("room").value.trim();
+
+      if (!room) {
+        error.textContent = "Enter a room code.";
+        return;
       }
-    } catch (e) {
-      socket.emit('errorMsg', 'Illegal move.');
-    }
-  });
 
-  socket.on('reset', () => {
-    const room = socket.data.room;
-    const r = rooms.get(room);
+      error.textContent = "";
+      socket.emit("join", { room });
+    };
 
-    if (!r) return;
+    document.getElementById("resetBtn").onclick = () => {
+      socket.emit("reset");
+    };
 
-    r.game = new Chess();
+    socket.on("joined", data => {
+      myColor = data.color;
 
-    io.to(room).emit('state', state(r));
-  });
+      status.textContent =
+        "Joined room: " + data.room +
+        " | You are " +
+        (myColor === "w" ? "White" : "Black");
+    });
 
-  socket.on('disconnect', () => {
-    const room = socket.data.room;
-    const r = rooms.get(room);
+    socket.on("state", data => {
+      currentFen = data.fen.split(" ")[0];
 
-    if (!r) return;
+      drawBoard(currentFen);
 
-    r.players = r.players.filter(
-      p => p.id !== socket.id
-    );
+      if (data.result) {
+        status.textContent = data.result;
+      } else {
+        status.textContent =
+          "Players: " + data.players +
+          " | Turn: " +
+          (data.turn === "w" ? "White" : "Black");
+      }
+    });
 
-    io.to(room).emit('state', state(r));
+    socket.on("errorMsg", msg => {
+      error.textContent = msg;
+    });
 
-    if (r.players.length === 0) {
-      rooms.delete(room);
-    }
-  });
-});
+    drawBoard(currentFen);
+  </script>
 
-const PORT = process.env.PORT || 3000;
-
-server.listen(PORT, '0.0.0.0', () => {
-  console.log(Hard Chess online server running on port ${PORT});
-});
+</body>
+</html>
